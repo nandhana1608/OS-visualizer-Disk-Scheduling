@@ -1,0 +1,167 @@
+from pathlib import Path
+
+html = r'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OS Scheduling Visualizer</title>
+<style>
+:root{--bg:#f4f7fb;--card:#fff;--ink:#172033;--muted:#64748b;--line:#e2e8f0;--blue:#2563eb;--blue2:#dbeafe;--green:#059669;--orange:#ea580c;--purple:#7c3aed}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Arial,sans-serif}
+header{background:#172554;color:white;padding:26px 5%;}header h1{margin:0;font-size:28px}header p{margin:6px 0 0;color:#cbd5e1}
+main{max-width:1150px;margin:24px auto;padding:0 16px}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+button,.tab{border:0;border-radius:9px;padding:10px 15px;background:#e2e8f0;color:#172033;font-weight:700;cursor:pointer}
+button.primary,.tab.active{background:var(--blue);color:white}button:disabled{opacity:.4;cursor:not-allowed}
+.panel{display:none}.panel.active{display:block}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:18px;box-shadow:0 3px 12px #0f172a08}
+h2{font-size:20px;margin:0 0 14px}h3{font-size:16px;margin:18px 0 8px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+label{display:block;font-size:13px;color:var(--muted);font-weight:700}input,select{width:100%;margin-top:5px;padding:10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit;color:var(--ink)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.hint{color:var(--muted);font-size:13px}.error{color:#b91c1c;font-weight:700;margin-top:10px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.stat{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:12px}.stat strong{display:block;font-size:22px;color:var(--blue)}
+.sequence{display:flex;flex-wrap:wrap;gap:7px}.chip{background:var(--blue2);color:#1e40af;padding:7px 10px;border-radius:8px;font-weight:700}
+canvas{width:100%;height:280px;border:1px solid var(--line);border-radius:10px;background:#fff}
+table{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:center}th{background:#f1f5f9}
+.gantt{display:flex;overflow-x:auto;padding:10px 0}.gblock{min-width:48px;text-align:center;padding:12px 5px;border:1px solid white;color:white;font-weight:700;border-radius:5px;position:relative}.gblock small{display:block;font-weight:400}
+.barrow{display:grid;grid-template-columns:75px 1fr 55px;gap:8px;align-items:center;margin:8px 0}.bartrack{height:17px;background:#e2e8f0;border-radius:20px;overflow:hidden}.bar{height:100%;background:var(--purple);border-radius:20px}
+footer{text-align:center;color:var(--muted);padding:25px;font-size:13px}
+@media(max-width:600px){header h1{font-size:23px}.card{padding:14px}table{font-size:12px}th,td{padding:6px}}
+</style>
+</head>
+<body>
+<header><h1>OS Scheduling Visualizer</h1><p>Learn disk scheduling and CPU scheduling through step-by-step visualizations.</p></header>
+<main>
+<div class="tabs">
+<button class="tab active" data-tab="disk">Disk Scheduling</button>
+<button class="tab" data-tab="cpu">CPU Scheduling</button>
+</div>
+
+<section id="disk" class="panel active">
+<div class="card">
+<h2>Part A — Disk Scheduling</h2>
+<div class="grid">
+<label>Disk cylinders (0 to size − 1)<input id="diskSize" type="number" min="2" max="10000" value="200"></label>
+<label>Initial head position<input id="head" type="number" value="50"></label>
+<label>Request queue (comma separated)<input id="requests" value="82, 170, 43, 140, 24, 16, 190"></label>
+<label>Direction for SCAN / C-SCAN / LOOK<select id="direction"><option value="right">Towards higher cylinders</option><option value="left">Towards lower cylinders</option></select></label>
+<label>Algorithm<select id="diskAlgo"><option>FCFS</option><option>SSTF</option><option>SCAN</option><option>C-SCAN</option><option>LOOK</option></select></label>
+</div>
+<!-- <p class="hint">The sample values are from your assignment: cylinders 0–199, head 50, requests 82, 170, 43, 140, 24, 16, 190.</p> -->
+<div class="actions"><button class="primary" id="runDisk">Run algorithm</button><button id="compareDisk">Compare all 5 algorithms</button></div><div id="diskError" class="error"></div>
+</div>
+<div class="card">
+<h2>Head movement visualization</h2><canvas id="seekCanvas" width="1000" height="280"></canvas>
+<div class="actions"><button id="prevStep">Previous</button><button class="primary" id="nextStep">Next</button><button id="playSteps">Auto-play</button><button id="resetSteps">Reset</button></div>
+<p id="stepInfo" class="hint">Run an algorithm to see each head movement.</p>
+<h3>Service sequence</h3><div id="diskSequence" class="sequence">—</div>
+<div class="stats" style="margin-top:14px"><div class="stat"><span>Total head movement</span><strong id="totalMovement">—</strong></div><div class="stat"><span>Requests served</span><strong id="servedCount">—</strong></div></div>
+</div>
+<div class="card"><h2>Comparison — Total head movement</h2><div id="comparison"><p class="hint">Click “Compare all 5 algorithms” to compare them using the same input.</p></div></div>
+</section>
+
+<section id="cpu" class="panel">
+<div class="card">
+<h2>Part B — CPU Scheduling</h2>
+<p class="hint">This visualizer implements FCFS and Round Robin (two algorithms selected from the assignment list).</p>
+<div class="grid">
+<label>Process ID<input id="pid" value="P1"></label>
+<label>Arrival time<input id="arrival" type="number" min="0" value="0"></label>
+<label>Burst time<input id="burst" type="number" min="1" value="5"></label>
+<label>Time quantum (Round Robin)<input id="quantum" type="number" min="1" value="2"></label>
+</div>
+<div class="actions"><button id="addProcess">Add process</button><button id="sampleCPU">Load sample processes</button><button id="clearCPU">Clear all</button></div>
+<div id="cpuError" class="error"></div><div id="processTable"></div>
+<div class="actions"><label style="min-width:220px">CPU algorithm<select id="cpuAlgo"><option>FCFS</option><option>Round Robin</option></select></label><button class="primary" id="runCPU">Run CPU scheduling</button></div>
+</div>
+<div class="card"><h2>Gantt chart</h2><div id="gantt" class="gantt">Run CPU scheduling to display the Gantt chart.</div><p id="ganttTimes" class="hint"></p></div>
+<div class="card"><h2>Process performance</h2><div id="cpuResults"><p class="hint">Waiting time = turnaround time − burst time. Turnaround time = completion time − arrival time.</p></div></div>
+</section>
+</main>
+<footer>OS Scheduling Visualizer · HTML, CSS and JavaScript · Runs locally in your browser</footer>
+<script>
+const $=id=>document.getElementById(id);
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.tab).classList.add('active')}));
+let diskResult=null,step=0,playTimer=null;
+function readDisk(){
+ const size=Number($('diskSize').value),head=Number($('head').value);
+ const req=$('requests').value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number);
+ if(!Number.isInteger(size)||size<2||size>10000)throw Error('Disk size must be an integer from 2 to 10000.');
+ if(!Number.isInteger(head)||head<0||head>=size)throw Error('Head position must be between 0 and '+(size-1)+'.');
+ if(!req.length||req.some(x=>!Number.isInteger(x)||x<0||x>=size))throw Error('Enter valid request cylinders between 0 and '+(size-1)+'.');
+ return {size,head,req,dir:$('direction').value};
+}
+function calculate(algo,d){
+ let cur=d.head,remaining=[...d.req],path=[cur],service=[],total=0;
+ function move(x){total+=Math.abs(x-cur);cur=x;path.push(cur)}
+ if(algo==='FCFS'){remaining.forEach(x=>{move(x);service.push(x)});}
+ if(algo==='SSTF'){while(remaining.length){let best=0;for(let i=1;i<remaining.length;i++)if(Math.abs(remaining[i]-cur)<Math.abs(remaining[best]-cur))best=i;let x=remaining.splice(best,1)[0];move(x);service.push(x)}}
+ if(['SCAN','C-SCAN','LOOK'].includes(algo)){
+  let lower=remaining.filter(x=>x<cur).sort((a,b)=>a-b),upper=remaining.filter(x=>x>=cur).sort((a,b)=>a-b);
+  if(d.dir==='right'){
+   upper.forEach(x=>{move(x);service.push(x)});
+   if(algo==='SCAN'){if(cur!==d.size-1)move(d.size-1);lower.slice().reverse().forEach(x=>{move(x);service.push(x)})}
+   if(algo==='LOOK')lower.slice().reverse().forEach(x=>{move(x);service.push(x)});
+   if(algo==='C-SCAN'&&lower.length){if(cur!==d.size-1)move(d.size-1);move(0);lower.forEach(x=>{move(x);service.push(x)})}
+  }else{
+   lower.slice().reverse().forEach(x=>{move(x);service.push(x)});
+   if(algo==='SCAN'){if(cur!==0)move(0);upper.forEach(x=>{move(x);service.push(x)})}
+   if(algo==='LOOK')upper.forEach(x=>{move(x);service.push(x)});
+   if(algo==='C-SCAN'&&upper.length){if(cur!==0)move(0);move(d.size-1);upper.slice().reverse().forEach(x=>{move(x);service.push(x)})}
+  }
+ }
+ return {algo,path,service,total};
+}
+function renderDisk(){
+ const c=$('seekCanvas'),ctx=c.getContext('2d'),r=diskResult;
+ ctx.clearRect(0,0,c.width,c.height);if(!r)return;
+ const pad=55,w=c.width-pad*2,h=c.height-65,max=Math.max(...r.path,1);
+ const x=i=>pad+i*(w/Math.max(r.path.length-1,1)),y=v=>c.height-35-v/(Number($('diskSize').value)-1)*h;
+ ctx.strokeStyle='#cbd5e1';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(pad,15);ctx.lineTo(pad,c.height-35);ctx.lineTo(c.width-15,c.height-35);ctx.stroke();
+ ctx.fillStyle='#64748b';ctx.font='12px Arial';ctx.fillText('Cylinder',8,17);ctx.fillText('Request order →',c.width-125,c.height-8);
+ ctx.strokeStyle='#2563eb';ctx.lineWidth=3;ctx.beginPath();
+ let upto=Math.min(step,r.path.length-1);for(let i=0;i<=upto;i++){if(i===0)ctx.moveTo(x(i),y(r.path[i]));else ctx.lineTo(x(i),y(r.path[i]))}ctx.stroke();
+ for(let i=0;i<=upto;i++){ctx.fillStyle=i===upto?'#ea580c':'#2563eb';ctx.beginPath();ctx.arc(x(i),y(r.path[i]),5,0,Math.PI*2);ctx.fill();ctx.fillStyle='#334155';ctx.fillText(r.path[i],x(i)-8,y(r.path[i])-10)}
+ $('stepInfo').textContent='Step '+step+' of '+(r.path.length-1)+': head is at cylinder '+r.path[upto]+(step===0?' (starting position).':'');
+ $('prevStep').disabled=step===0;$('nextStep').disabled=step>=r.path.length-1;
+}
+function showDisk(r){diskResult=r;step=0;$('diskSequence').innerHTML=r.service.map(x=>'<span class="chip">'+x+'</span>').join('');$('totalMovement').textContent=r.total;$('servedCount').textContent=r.service.length;renderDisk();}
+$('runDisk').onclick=()=>{stopPlay();try{let d=readDisk();showDisk(calculate($('diskAlgo').value,d));$('diskError').textContent=''}catch(e){$('diskError').textContent=e.message}};
+$('compareDisk').onclick=()=>{try{let d=readDisk(),results=['FCFS','SSTF','SCAN','C-SCAN','LOOK'].map(a=>calculate(a,d));let max=Math.max(...results.map(x=>x.total),1);$('comparison').innerHTML=results.map(r=>'<div class="barrow"><b>'+r.algo+'</b><div class="bartrack"><div class="bar" style="width:'+(r.total/max*100)+'%"></div></div><b>'+r.total+'</b></div>').join('');$('diskError').textContent='';showDisk(calculate($('diskAlgo').value,d))}catch(e){$('diskError').textContent=e.message}};
+$('nextStep').onclick=()=>{if(diskResult&&step<diskResult.path.length-1){step++;renderDisk()}};
+$('prevStep').onclick=()=>{if(step>0){step--;renderDisk()}};
+function stopPlay(){if(playTimer){clearInterval(playTimer);playTimer=null}$('playSteps').textContent='Auto-play'}
+$('playSteps').onclick=()=>{if(!diskResult)return;if(playTimer){stopPlay();return}if(step>=diskResult.path.length-1)step=0;$('playSteps').textContent='Pause';playTimer=setInterval(()=>{if(step<diskResult.path.length-1){step++;renderDisk()}else stopPlay()},650)};
+$('resetSteps').onclick=()=>{stopPlay();step=0;renderDisk()};
+
+let processes=[],cpuRun=null;
+function drawProcesses(){$('processTable').innerHTML=processes.length?'<table><tr><th>Process</th><th>Arrival</th><th>Burst</th><th>Action</th></tr>'+processes.map((p,i)=>'<tr><td>'+p.id+'</td><td>'+p.arrival+'</td><td>'+p.burst+'</td><td><button onclick="removeProcess('+i+')">Remove</button></td></tr>').join('')+'</table>':'<p class="hint">No processes added yet.</p>'}
+window.removeProcess=i=>{processes.splice(i,1);drawProcesses()};
+$('addProcess').onclick=()=>{let id=$('pid').value.trim(),a=Number($('arrival').value),b=Number($('burst').value);if(!id||processes.some(p=>p.id===id)||!Number.isInteger(a)||a<0||!Number.isInteger(b)||b<1){$('cpuError').textContent='Use a unique process ID, arrival time ≥ 0 and burst time ≥ 1.';return}processes.push({id,arrival:a,burst:b});$('pid').value='P'+(processes.length+1);$('cpuError').textContent='';drawProcesses()};
+$('sampleCPU').onclick=()=>{processes=[{id:'P1',arrival:0,burst:5},{id:'P2',arrival:1,burst:3},{id:'P3',arrival:2,burst:1},{id:'P4',arrival:3,burst:2}];drawProcesses();$('cpuError').textContent=''};
+$('clearCPU').onclick=()=>{processes=[];drawProcesses();$('gantt').textContent='';$('cpuResults').innerHTML=''};
+function scheduleCPU(){
+ if(!processes.length)throw Error('Add at least one process.');
+ let ps=processes.map(p=>({...p,remaining:p.burst})).sort((a,b)=>a.arrival-b.arrival),timeline=[],time=0,done=0,completion={};
+ function add(id,start,end){if(end>start)timeline.push({id,start,end})}
+ if($('cpuAlgo').value==='FCFS'){
+  ps.forEach(p=>{if(time<p.arrival){add('Idle',time,p.arrival);time=p.arrival}let s=time;time+=p.burst;add(p.id,s,time);completion[p.id]=time});
+ }else{
+  let q=Number($('quantum').value);if(!Number.isInteger(q)||q<1)throw Error('Time quantum must be a positive integer.');
+  let ready=[],idx=0;while(done<ps.length){
+   while(idx<ps.length&&ps[idx].arrival<=time)ready.push(ps[idx++]);
+   if(!ready.length){let next=ps[idx].arrival;add('Idle',time,next);time=next;continue}
+   let p=ready.shift(),run=Math.min(q,p.remaining),s=time;time+=run;p.remaining-=run;add(p.id,s,time);
+   while(idx<ps.length&&ps[idx].arrival<=time)ready.push(ps[idx++]);
+   if(p.remaining>0)ready.push(p);else{completion[p.id]=time;done++}
+  }
+ }
+ let rows=ps.map(p=>{let tat=completion[p.id]-p.arrival,wait=tat-p.burst;return {...p,completion:completion[p.id],tat,wait}});
+ return {timeline,rows,avgWait:rows.reduce((s,p)=>s+p.wait,0)/rows.length,avgTat:rows.reduce((s,p)=>s+p.tat,0)/rows.length};
+}
+$('runCPU').onclick=()=>{try{cpuRun=scheduleCPU();let colors=['#2563eb','#059669','#7c3aed','#ea580c','#0891b2'];$('gantt').innerHTML=cpuRun.timeline.map((t,i)=>'<div class="gblock" style="background:'+(t.id==='Idle'?'#94a3b8':colors[processes.findIndex(p=>p.id===t.id)%colors.length])+';flex:'+Math.max(1,t.end-t.start)+'"><small>'+t.start+'–'+t.end+'</small>'+t.id+'</div>').join('');$('ganttTimes').textContent='Timeline: '+cpuRun.timeline.map(t=>t.start).concat(cpuRun.timeline.length?cpuRun.timeline[cpuRun.timeline.length-1].end:[]).join(' → ');$('cpuResults').innerHTML='<table><tr><th>Process</th><th>Completion</th><th>Turnaround</th><th>Waiting</th></tr>'+cpuRun.rows.map(p=>'<tr><td>'+p.id+'</td><td>'+p.completion+'</td><td>'+p.tat+'</td><td>'+p.wait+'</td></tr>').join('')+'</table><div class="stats" style="margin-top:14px"><div class="stat">Average waiting time<strong>'+cpuRun.avgWait.toFixed(2)+'</strong></div><div class="stat">Average turnaround time<strong>'+cpuRun.avgTat.toFixed(2)+'</strong></div></div>';$('cpuError').textContent=''}catch(e){$('cpuError').textContent=e.message}};
+drawProcesses();$('prevStep').disabled=true;$('nextStep').disabled=true;
+</script>
+</body>
+</html>'''
+path = Path("/mnt/data/os_scheduling_visualizer.html")
+path.write_text(html, encoding="utf-8")
+print(f"Created {path} ({path.stat().st_size:,} bytes)")
